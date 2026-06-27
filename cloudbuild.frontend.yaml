@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Frontend-only pipeline
+#
+# Triggered by: changes to frontend/** on any branch
+# Purpose:      build → docker build → push → deploy the React/nginx service
+#
+# Recommended Cloud Build trigger settings:
+#   Included files filter:  frontend/**
+#   Excluded files filter:  backend/**, terraform/**
+#   Substitutions:
+#     _ENV               = dev | staging | prod  (default: dev)
+#     _REGION            = us-central1           (default: us-central1)
+#     _AR_REPO           = enterprise-ai-platform
+#     _SERVICE_FRONTEND  = enterprise-ai-frontend
+#
+# Required Cloud Build SA roles:
+#   roles/artifactregistry.writer
+#   roles/run.developer
+# ─────────────────────────────────────────────────────────────────────────────
+
+substitutions:
+  _ENV: dev
+  _REGION: us-central1
+  _AR_REPO: enterprise-ai-platform
+  _SERVICE_FRONTEND: enterprise-ai-frontend
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  dynamic_substitutions: true
+
+steps:
+  # ── npm ci + Vite production build ───────────────────────────
+  - name: node:20-slim
+    id: frontend-build
+    dir: frontend
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        npm ci
+        npm run build
+
+  # ── Build Docker image (nginx) ────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: frontend-docker-build
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:latest
+      - -f
+      - frontend/Dockerfile
+      - frontend/
+    waitFor: [frontend-build]
+
+  # ── Push to Artifact Registry ─────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: frontend-push
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}
+    waitFor: [frontend-docker-build]
+
+  # ── Deploy to Cloud Run ───────────────────────────────────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: frontend-deploy
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_FRONTEND}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=512Mi
+      - --cpu=1
+    waitFor: [frontend-push]
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA

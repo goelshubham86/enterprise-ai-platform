@@ -1,0 +1,97 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Terraform-only pipeline
+#
+# Triggered by: changes to terraform/** on any branch
+# Purpose:      validate + plan on every push; apply only when _APPLY_INFRA=true
+#
+# Recommended Cloud Build trigger settings:
+#   Included files filter:  terraform/**
+#   Excluded files filter:  frontend/**, backend/**
+#   Substitutions:
+#     _ENV          = dev | staging | prod   (default: dev)
+#     _REGION       = us-central1            (default: us-central1)
+#     _APPLY_INFRA  = true | false           (default: false)
+#
+# Required Cloud Build SA roles:
+#   roles/storage.admin   (Terraform state bucket + managed buckets)
+#   roles/iam.serviceAccountUser (if creating SAs via Terraform)
+# ─────────────────────────────────────────────────────────────────────────────
+
+substitutions:
+  _ENV: dev
+  _REGION: us-central1
+  _APPLY_INFRA: "false"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  dynamic_substitutions: true
+
+steps:
+  # ── Init: download providers, configure GCS backend ──────────
+  - name: hashicorp/terraform:1.9
+    id: tf-init
+    dir: terraform/environments/${_ENV}
+    entrypoint: terraform
+    args:
+      - init
+      - -input=false
+      - -reconfigure
+    env:
+      - TF_IN_AUTOMATION=true
+
+  # ── Validate: syntax + schema check (no network calls) ───────
+  - name: hashicorp/terraform:1.9
+    id: tf-validate
+    dir: terraform/environments/${_ENV}
+    entrypoint: terraform
+    args: [validate]
+    waitFor: [tf-init]
+
+  # ── Format check ─────────────────────────────────────────────
+  - name: hashicorp/terraform:1.9
+    id: tf-fmt-check
+    dir: terraform
+    entrypoint: terraform
+    args: [fmt, -check, -recursive]
+    waitFor: [tf-init]
+
+  # ── Plan: show diff; always runs (read-only, safe) ───────────
+  - name: hashicorp/terraform:1.9
+    id: tf-plan
+    dir: terraform/environments/${_ENV}
+    entrypoint: terraform
+    args:
+      - plan
+      - -input=false
+      - -out=tfplan
+      - -var=project_id=$PROJECT_ID
+      - -var=region=${_REGION}
+    env:
+      - TF_IN_AUTOMATION=true
+    waitFor: [tf-validate, tf-fmt-check]
+
+  # ── Apply: gated by _APPLY_INFRA=true ────────────────────────
+  #
+  # Default (_APPLY_INFRA=false): plan-only — safe for PRs and branch pushes.
+  # Set _APPLY_INFRA=true in the Cloud Build trigger that runs on main branch
+  # merges, or trigger manually for controlled deployments.
+  - name: hashicorp/terraform:1.9
+    id: tf-apply
+    dir: terraform/environments/${_ENV}
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_APPLY_INFRA}" = "true" ]; then
+          echo "━━━ Applying Terraform for environment: ${_ENV} ━━━"
+          terraform apply -input=false -auto-approve tfplan
+          echo "━━━ Apply complete ━━━"
+          terraform output
+        else
+          echo "━━━ PLAN-ONLY mode ━━━"
+          echo "    _APPLY_INFRA=${_APPLY_INFRA} — no changes applied."
+          echo "    To provision, re-run with _APPLY_INFRA=true."
+        fi
+    env:
+      - TF_IN_AUTOMATION=true
+    waitFor: [tf-plan]

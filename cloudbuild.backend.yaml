@@ -1,0 +1,87 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend-only pipeline
+#
+# Triggered by: changes to backend/** on any branch
+# Purpose:      test → build → push → deploy the FastAPI service
+#
+# Recommended Cloud Build trigger settings:
+#   Included files filter:  backend/**
+#   Excluded files filter:  frontend/**, terraform/**
+#   Substitutions:
+#     _ENV              = dev | staging | prod  (default: dev)
+#     _REGION           = us-central1           (default: us-central1)
+#     _AR_REPO          = enterprise-ai-platform
+#     _SERVICE_BACKEND  = enterprise-ai-backend
+#
+# Required Cloud Build SA roles:
+#   roles/artifactregistry.writer
+#   roles/run.developer
+#   roles/iam.serviceAccountUser
+# ─────────────────────────────────────────────────────────────────────────────
+
+substitutions:
+  _ENV: dev
+  _REGION: us-central1
+  _AR_REPO: enterprise-ai-platform
+  _SERVICE_BACKEND: enterprise-ai-backend
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  dynamic_substitutions: true
+
+steps:
+  # ── Python lint + unit tests ──────────────────────────────────
+  - name: python:3.12-slim
+    id: backend-test
+    dir: backend
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install -r requirements.txt -q
+        python -m pytest tests/ -v --tb=short
+
+  # ── Build Docker image ────────────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: backend-build
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:latest
+      - -f
+      - backend/Dockerfile
+      - backend/
+    waitFor: [backend-test]
+
+  # ── Push to Artifact Registry ─────────────────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: backend-push
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}
+    waitFor: [backend-build]
+
+  # ── Deploy to Cloud Run ───────────────────────────────────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: backend-deploy
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_BACKEND}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --memory=2Gi
+      - --cpu=2
+      - --min-instances=1
+      - --max-instances=10
+      - --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},APP_ENV=${_ENV}
+    waitFor: [backend-push]
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA

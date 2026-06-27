@@ -1,0 +1,107 @@
+substitutions:
+  _REGION: us-central1
+  _SERVICE_BACKEND: enterprise-ai-backend
+  _SERVICE_FRONTEND: enterprise-ai-frontend
+  _AR_REPO: enterprise-ai-platform
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # ─── Backend: Lint & Test ────────────────────────────────────
+  - name: python:3.12-slim
+    id: backend-test
+    dir: backend
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install -r requirements.txt -q
+        python -m pytest tests/ -v --tb=short
+
+  # ─── Backend: Build & Push Docker Image ─────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: backend-build
+    waitFor: [backend-test]
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
+      - -f
+      - backend/Dockerfile
+      - backend/
+
+  - name: gcr.io/cloud-builders/docker
+    id: backend-push
+    waitFor: [backend-build]
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
+
+  # ─── Frontend: Build ─────────────────────────────────────────
+  - name: node:20-slim
+    id: frontend-build
+    dir: frontend
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        npm ci
+        npm run build
+
+  # ─── Frontend: Build & Push Docker Image ────────────────────
+  - name: gcr.io/cloud-builders/docker
+    id: frontend-docker-build
+    waitFor: [frontend-build]
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA
+      - -f
+      - frontend/Dockerfile
+      - frontend/
+
+  - name: gcr.io/cloud-builders/docker
+    id: frontend-push
+    waitFor: [frontend-docker-build]
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA
+
+  # ─── Backend: Deploy to Cloud Run ────────────────────────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: backend-deploy
+    waitFor: [backend-push]
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_BACKEND}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --memory=2Gi
+      - --cpu=2
+      - --min-instances=1
+      - --max-instances=10
+
+  # ─── Frontend: Deploy to Cloud Run ───────────────────────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: frontend-deploy
+    waitFor: [frontend-push]
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_FRONTEND}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=512Mi
+      - --cpu=1
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA

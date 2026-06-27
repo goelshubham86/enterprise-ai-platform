@@ -1,14 +1,101 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Enterprise AI Platform — Cloud Build CI/CD Pipeline
+#
+# Stages:
+#   1. Terraform  validate → plan → apply (apply only when _APPLY_INFRA=true)
+#   2. Backend    test → build → push → deploy
+#   3. Frontend   build → docker build → push → deploy
+#
+# Substitution variables (set in Cloud Build trigger or at invocation time):
+#   _ENV            Deployment environment: dev | staging | prod  (default: dev)
+#   _REGION         GCP region                                    (default: us-central1)
+#   _APPLY_INFRA    Run terraform apply                           (default: false)
+#   _AR_REPO        Artifact Registry repo name
+#   _SERVICE_BACKEND  Cloud Run backend service name
+#   _SERVICE_FRONTEND Cloud Run frontend service name
+#
+# Required Cloud Build SA roles:
+#   roles/storage.admin          (Terraform state bucket + document bucket)
+#   roles/artifactregistry.writer
+#   roles/run.developer
+#   roles/iam.serviceAccountUser
+# ─────────────────────────────────────────────────────────────────────────────
+
 substitutions:
+  _ENV: dev
   _REGION: us-central1
+  _APPLY_INFRA: "false"
+  _AR_REPO: enterprise-ai-platform
   _SERVICE_BACKEND: enterprise-ai-backend
   _SERVICE_FRONTEND: enterprise-ai-frontend
-  _AR_REPO: enterprise-ai-platform
 
 options:
   logging: CLOUD_LOGGING_ONLY
+  dynamic_substitutions: true
 
+# ─────────────────────────────────────────────────────────────
+# STAGE 1 — TERRAFORM
+# ─────────────────────────────────────────────────────────────
 steps:
-  # ─── Backend: Lint & Test ────────────────────────────────────
+
+  # 1a. Init — download providers, configure GCS backend
+  - name: hashicorp/terraform:1.9
+    id: tf-init
+    dir: terraform/environments/${_ENV}
+    entrypoint: terraform
+    args:
+      - init
+      - -input=false
+      - -reconfigure
+    env:
+      - TF_VAR_project_id=$PROJECT_ID
+      - TF_VAR_region=${_REGION}
+
+  # 1b. Validate — syntax + schema check (no network calls)
+  - name: hashicorp/terraform:1.9
+    id: tf-validate
+    dir: terraform/environments/${_ENV}
+    entrypoint: terraform
+    args: [validate]
+    waitFor: [tf-init]
+
+  # 1c. Plan — show what will change; always runs (safe, read-only)
+  - name: hashicorp/terraform:1.9
+    id: tf-plan
+    dir: terraform/environments/${_ENV}
+    entrypoint: terraform
+    args:
+      - plan
+      - -input=false
+      - -out=tfplan
+      - -var=project_id=$PROJECT_ID
+      - -var=region=${_REGION}
+    waitFor: [tf-validate]
+
+  # 1d. Apply — executes the plan; gated by _APPLY_INFRA=true
+  #     On pull requests: skipped (plan-only review).
+  #     On merge to main / manual trigger: set _APPLY_INFRA=true to provision.
+  - name: hashicorp/terraform:1.9
+    id: tf-apply
+    dir: terraform/environments/${_ENV}
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_APPLY_INFRA}" = "true" ]; then
+          echo ">>> Applying Terraform plan for environment: ${_ENV}"
+          terraform apply -input=false -auto-approve tfplan
+        else
+          echo ">>> _APPLY_INFRA is not 'true' — skipping apply (plan-only mode)."
+          echo "    To apply, set substitution _APPLY_INFRA=true in the trigger."
+        fi
+    waitFor: [tf-plan]
+
+# ─────────────────────────────────────────────────────────────
+# STAGE 2 — BACKEND
+# ─────────────────────────────────────────────────────────────
+
+  # 2a. Python lint + unit tests
   - name: python:3.12-slim
     id: backend-test
     dir: backend
@@ -18,60 +105,34 @@ steps:
       - |
         pip install -r requirements.txt -q
         python -m pytest tests/ -v --tb=short
+    waitFor: [tf-apply]
 
-  # ─── Backend: Build & Push Docker Image ─────────────────────
+  # 2b. Build Docker image
   - name: gcr.io/cloud-builders/docker
     id: backend-build
-    waitFor: [backend-test]
     args:
       - build
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:latest
       - -f
       - backend/Dockerfile
       - backend/
+    waitFor: [backend-test]
 
+  # 2c. Push to Artifact Registry
   - name: gcr.io/cloud-builders/docker
     id: backend-push
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}
     waitFor: [backend-build]
-    args:
-      - push
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
 
-  # ─── Frontend: Build ─────────────────────────────────────────
-  - name: node:20-slim
-    id: frontend-build
-    dir: frontend
-    entrypoint: bash
-    args:
-      - -c
-      - |
-        npm ci
-        npm run build
-
-  # ─── Frontend: Build & Push Docker Image ────────────────────
-  - name: gcr.io/cloud-builders/docker
-    id: frontend-docker-build
-    waitFor: [frontend-build]
-    args:
-      - build
-      - -t
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA
-      - -f
-      - frontend/Dockerfile
-      - frontend/
-
-  - name: gcr.io/cloud-builders/docker
-    id: frontend-push
-    waitFor: [frontend-docker-build]
-    args:
-      - push
-      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA
-
-  # ─── Backend: Deploy to Cloud Run ────────────────────────────
+  # 2d. Deploy to Cloud Run
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     id: backend-deploy
-    waitFor: [backend-push]
     entrypoint: gcloud
     args:
       - run
@@ -85,11 +146,52 @@ steps:
       - --cpu=2
       - --min-instances=1
       - --max-instances=10
+      - --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},APP_ENV=${_ENV}
+    waitFor: [backend-push]
 
-  # ─── Frontend: Deploy to Cloud Run ───────────────────────────
+# ─────────────────────────────────────────────────────────────
+# STAGE 3 — FRONTEND
+# Runs in parallel with backend stages 2b-2d (both wait on backend-test)
+# ─────────────────────────────────────────────────────────────
+
+  # 3a. npm ci + Vite production build
+  - name: node:20-slim
+    id: frontend-build
+    dir: frontend
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        npm ci
+        npm run build
+    waitFor: [tf-apply]
+
+  # 3b. Build Docker image (nginx)
+  - name: gcr.io/cloud-builders/docker
+    id: frontend-docker-build
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:latest
+      - -f
+      - frontend/Dockerfile
+      - frontend/
+    waitFor: [frontend-build]
+
+  # 3c. Push to Artifact Registry
+  - name: gcr.io/cloud-builders/docker
+    id: frontend-push
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}
+    waitFor: [frontend-docker-build]
+
+  # 3d. Deploy to Cloud Run
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     id: frontend-deploy
-    waitFor: [frontend-push]
     entrypoint: gcloud
     args:
       - run
@@ -101,7 +203,11 @@ steps:
       - --allow-unauthenticated
       - --memory=512Mi
       - --cpu=1
+    waitFor: [frontend-push]
 
+# ─────────────────────────────────────────────────────────────
+# Artifact registry — images produced by this build
+# ─────────────────────────────────────────────────────────────
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_FRONTEND}:$COMMIT_SHA

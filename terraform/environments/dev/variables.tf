@@ -1,6 +1,5 @@
 # ─── Required ─────────────────────────────────────────────────────────────────
 
-
 variable "project_id" {
   description = "GCP project ID in which all resources are created."
   type        = string

@@ -1,42 +1,75 @@
+# ─── Required ─────────────────────────────────────────────────────────────────
+
 variable "project_id" {
-  description = "GCP project ID."
+  description = "GCP project ID in which all resources are created."
   type        = string
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", var.project_id))
+    error_message = "project_id must be 6-30 lowercase letters, numbers, or hyphens, starting with a letter."
+  }
 }
+
+# ─── Regional ─────────────────────────────────────────────────────────────────
 
 variable "region" {
   description = "Primary GCP region for all resources."
   type        = string
   default     = "us-central1"
+
+  validation {
+    condition = contains([
+      "us-central1", "us-east1", "us-east4", "us-west1", "us-west2",
+      "europe-west1", "europe-west2", "europe-west3", "europe-west4",
+      "asia-east1", "asia-northeast1", "asia-southeast1",
+    ], var.region)
+    error_message = "region must be a supported GCP region."
+  }
 }
+
+# ─── Phase 2: IAM + CORS ──────────────────────────────────────────────────────
 
 variable "backend_sa_email" {
   description = <<-EOT
     Email of the Cloud Run backend service account.
-    Granted roles/storage.objectAdmin on all document buckets.
-    Leave empty to skip IAM binding (useful before the SA exists).
+    Granted roles/storage.objectAdmin on document and artifact buckets.
+    Set to null to skip IAM binding (safe before the SA is created in Phase 3).
   EOT
-  type    = string
-  default = ""
+  type        = string
+  default     = null
 }
 
 variable "frontend_origin" {
   description = <<-EOT
-    Frontend origin URL for CORS (e.g. https://my-app-abc123-uc.a.run.app).
-    Required only if the browser uploads directly to GCS.
-    Leave empty to disable CORS on the bucket.
+    Frontend origin URL for CORS on the documents bucket
+    (e.g. https://enterprise-ai-frontend-abc123-uc.a.run.app).
+    Required only when the browser uploads directly to GCS.
+    Set to null to disable CORS.
   EOT
-  type    = string
-  default = ""
+  type        = string
+  default     = null
 }
 
+# ─── Phase 3: Cloud Run ───────────────────────────────────────────────────────
+# These variables are consumed by the cloud-run module (not yet active).
+# Declared here so terraform.tfvars can be populated before Phase 3 begins.
+
 variable "backend_image" {
-  description = "Backend Docker image URI (Artifact Registry). Used by Cloud Run module (Phase 3)."
+  description = <<-EOT
+    Backend Docker image URI in Artifact Registry.
+    Format: {region}-docker.pkg.dev/{project}/{repo}/enterprise-ai-backend:{tag}
+    Used by the cloud-run module (Phase 3).
+  EOT
   type        = string
-  default     = ""
+  default     = null
 }
 
 variable "frontend_image" {
-  description = "Frontend Docker image URI (Artifact Registry). Used by Cloud Run module (Phase 3)."
+  description = <<-EOT
+    Frontend Docker image URI in Artifact Registry.
+    Format: {region}-docker.pkg.dev/{project}/{repo}/enterprise-ai-frontend:{tag}
+    Used by the cloud-run module (Phase 3).
+  EOT
   type        = string
-  default     = ""
+  default     = null
 }

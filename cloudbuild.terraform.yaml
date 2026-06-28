@@ -55,6 +55,27 @@ steps:
     args: [fmt, -check, -recursive]
     waitFor: [tf-init]
 
+  # ── TFLint: static analysis (runs in parallel with validate + fmt) ──
+  #
+  # Checks naming conventions, required_version hygiene (terraform plugin)
+  # and GCP-specific rules such as invalid resource names and deprecated
+  # attributes (google plugin). No GCP credentials required — pure HCL.
+  #
+  # Pin the image tag to match plugin versions in terraform/.tflint.hcl.
+  # To upgrade: update the tag here AND the version in .tflint.hcl.
+  - name: ghcr.io/terraform-linters/tflint:v0.54.0
+    id: tf-lint
+    dir: terraform
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        echo "━━━ TFLint: downloading plugins ━━━"
+        tflint --init
+        echo "━━━ TFLint: linting all modules and environments ━━━"
+        tflint --recursive --format=compact
+    waitFor: [tf-init]
+
   # ── Plan: show diff; always runs (read-only, safe) ───────────
   - name: hashicorp/terraform:1.9
     id: tf-plan
@@ -68,7 +89,7 @@ steps:
       - -var=region=${_REGION}
     env:
       - TF_IN_AUTOMATION=true
-    waitFor: [tf-validate, tf-fmt-check]
+    waitFor: [tf-validate, tf-fmt-check, tf-lint]
 
   # ── Apply: gated by _APPLY_INFRA=true ────────────────────────
   #

@@ -49,27 +49,3 @@ variable "frontend_origin" {
   type        = string
   default     = null
 }
-
-# ─── Phase 3: Cloud Run ───────────────────────────────────────────────────────
-# These variables are consumed by the cloud-run module (not yet active).
-# Declared here so terraform.tfvars can be populated before Phase 3 begins.
-
-variable "backend_image" {
-  description = <<-EOT
-    Backend Docker image URI in Artifact Registry.
-    Format: {region}-docker.pkg.dev/{project}/{repo}/enterprise-ai-backend:{tag}
-    Used by the cloud-run module (Phase 3).
-  EOT
-  type        = string
-  default     = null
-}
-
-variable "frontend_image" {
-  description = <<-EOT
-    Frontend Docker image URI in Artifact Registry.
-    Format: {region}-docker.pkg.dev/{project}/{repo}/enterprise-ai-frontend:{tag}
-    Used by the cloud-run module (Phase 3).
-  EOT
-  type        = string
-  default     = null
-}

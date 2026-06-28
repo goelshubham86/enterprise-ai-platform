@@ -13,9 +13,3 @@ region     = "us-central1"
 # Set to your Cloud Run frontend URL to enable CORS for direct browser uploads.
 # Leave commented out (null) to disable CORS.
 # frontend_origin = "https://enterprise-ai-frontend-abc123-uc.a.run.app"
-
-# ─── Phase 3: Cloud Run ───────────────────────────────────────────────────────
-
-# Set when deploying Cloud Run services (Phase 3).
-# backend_image  = "us-central1-docker.pkg.dev/your-gcp-project-id/enterprise-ai-platform/enterprise-ai-backend:latest"
-# frontend_image = "us-central1-docker.pkg.dev/your-gcp-project-id/enterprise-ai-platform/enterprise-ai-frontend:latest"

@@ -1,11 +1,15 @@
 # Copy this file to terraform.tfvars and fill in real values.
 # terraform.tfvars is gitignored — never commit real project IDs or SA emails.
 
-project_id       = "your-gcp-project-id"
-region           = "us-central1"
+project_id = "your-gcp-project-id"
+region     = "us-central1"
 
-# Set after the backend Cloud Run service account is created (Phase 3)
-backend_sa_email = ""
+# ─── Phase 2: IAM + CORS ──────────────────────────────────────────────────────
 
-# Set to your Cloud Run frontend URL to enable CORS for direct uploads
-frontend_origin  = ""
+# Set after the backend Cloud Run service account is created (Phase 3).
+# Leave commented out (null) until the SA exists.
+# backend_sa_email = "enterprise-ai-backend@your-gcp-project-id.iam.gserviceaccount.com"
+
+# Set to your Cloud Run frontend URL to enable CORS for direct browser uploads.
+# Leave commented out (null) to disable CORS.
+# frontend_origin = "https://enterprise-ai-frontend-abc123-uc.a.run.app"

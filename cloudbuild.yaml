@@ -64,7 +64,7 @@ steps:
   - name: hashicorp/terraform:1.9
     id: tf-init
     dir: terraform/environments/${_ENV}
-    entrypoint: bash
+    entrypoint: sh
     args:
       - -c
       - |
@@ -80,7 +80,7 @@ steps:
   - name: hashicorp/terraform:1.9
     id: tf-validate
     dir: terraform/environments/${_ENV}
-    entrypoint: bash
+    entrypoint: sh
     args:
       - -c
       - |
@@ -91,11 +91,32 @@ steps:
         fi
     waitFor: [tf-init]
 
-  # 1c. Plan (always read-only — safe to run on every push)
+  # 1c. TFLint: static analysis (runs in parallel with validate)
+  #
+  # Checks naming conventions, required_version hygiene (terraform plugin)
+  # and GCP-specific rules (google plugin). No GCP credentials required.
+  - name: ghcr.io/terraform-linters/tflint:v0.54.0
+    id: tf-lint
+    dir: terraform
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        if [ "${_DEPLOY_TERRAFORM}" = "true" ]; then
+          echo "━━━ TFLint: downloading plugins ━━━"
+          tflint --init
+          echo "━━━ TFLint: linting all modules and environments ━━━"
+          tflint --recursive --format=compact
+        else
+          echo "Skipping TFLint (_DEPLOY_TERRAFORM=false)"
+        fi
+    waitFor: [tf-init]
+
+  # 1d. Plan (always read-only — safe to run on every push)
   - name: hashicorp/terraform:1.9
     id: tf-plan
     dir: terraform/environments/${_ENV}
-    entrypoint: bash
+    entrypoint: sh
     args:
       - -c
       - |
@@ -110,13 +131,13 @@ steps:
         fi
     env:
       - TF_IN_AUTOMATION=true
-    waitFor: [tf-validate]
+    waitFor: [tf-validate, tf-lint]
 
   # 1d. Apply — only when _DEPLOY_TERRAFORM=true AND _APPLY_INFRA=true
   - name: hashicorp/terraform:1.9
     id: tf-apply
     dir: terraform/environments/${_ENV}
-    entrypoint: bash
+    entrypoint: sh
     args:
       - -c
       - |

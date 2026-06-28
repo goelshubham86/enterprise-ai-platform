@@ -1,84 +1,98 @@
-/*
-  Environment: dev
-  ----------------
-  Instantiates all platform infrastructure modules for the dev environment.
-  Add or uncomment modules as each phase is implemented.
+# ─────────────────────────────────────────────────────────────────────────────
+# main.tf — dev environment
+#
+# Instantiates platform infrastructure modules.
+# Add or uncomment modules as each phase is implemented.
+#
+# Provider config  → providers.tf
+# Version pins     → versions.tf
+# Shared locals    → locals.tf
+# Input variables  → variables.tf
+# Outputs          → outputs.tf
+# ─────────────────────────────────────────────────────────────────────────────
 
-  State backend: GCS bucket 'enterprise-ai-tfstate-dev'
-  (Create this bucket manually once before first `terraform init`)
-*/
-
-terraform {
-  required_version = ">= 1.7"
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 6.0"
-    }
-  }
-
-  backend "gcs" {
-    bucket = "enterprise-ai-tfstate-dev"
-    prefix = "terraform/state"
-  }
-}
-
-provider "google" {
-  project = var.project_id
-  region  = var.region
-}
-
-# ─── Phase 2: Document Storage Bucket ─────────────────────────
+# ─── Phase 2: Document Storage Bucket ─────────────────────────────────────────
 #
 # Stores uploaded PDFs before they are parsed, chunked, and embedded.
-# The backend Cloud Run service account is granted objectAdmin so it
-# can upload, read, and delete documents via the service layer.
+# The backend Cloud Run service account is granted objectAdmin so it can
+# upload, read, and delete documents via the storage service layer.
 
 module "documents_bucket" {
   source = "../../modules/cloud-storage"
 
   project_id = var.project_id
   name       = "documents"
-  env        = "dev"
+  env        = local.env
   location   = var.region
 
   storage_class      = "STANDARD"
   versioning_enabled = true
-  force_destroy      = true   # safe for dev; always false in prod
+  force_destroy      = true # safe for dev; always false in staging and prod
 
-  # Grant the backend service account full object access
-  object_admins = var.backend_sa_email != "" ? [
+  object_admins = var.backend_sa_email != null ? [
     "serviceAccount:${var.backend_sa_email}"
   ] : []
 
-  # Allow direct browser uploads from the dev frontend (optional)
-  cors_origins = var.frontend_origin != "" ? [var.frontend_origin] : []
+  cors_origins = var.frontend_origin != null ? [var.frontend_origin] : []
 
-  labels = {
-    team    = "ai-platform"
+  labels = merge(local.common_labels, {
     purpose = "document-storage"
-  }
+  })
 }
 
-# ─── Phase 2: Model / Embedding Artifacts Bucket ─────────────
-# Uncomment when embedding artifacts need to be persisted.
+# ─── Phase 2: Embedding Artifacts Bucket ──────────────────────────────────────
+# Stores FAISS index files and embedding cache produced by the backend.
+# Uncomment when the embedding pipeline is implemented.
 
 # module "artifacts_bucket" {
 #   source = "../../modules/cloud-storage"
 #
 #   project_id         = var.project_id
 #   name               = "artifacts"
-#   env                = "dev"
+#   env                = local.env
 #   location           = var.region
 #   versioning_enabled = true
 #   force_destroy      = true
 #
-#   object_admins = var.backend_sa_email != "" ? [
+#   object_admins = var.backend_sa_email != null ? [
 #     "serviceAccount:${var.backend_sa_email}"
 #   ] : []
+#
+#   labels = merge(local.common_labels, {
+#     purpose = "embedding-artifacts"
+#   })
 # }
 
-# ─── Future: Cloud Run, Vertex AI, Networking ─────────────────
-# module "networking" { ... }
-# module "cloud_run_backend" { ... }
-# module "vertex_ai" { ... }
+# ─── Phase 4: Networking ───────────────────────────────────────────────────────
+# module "networking" {
+#   source  = "../../modules/networking"
+#   project_id = var.project_id
+#   env        = local.env
+#   region     = var.region
+# }
+
+# ─── Phase 3: Cloud Run — Backend ─────────────────────────────────────────────
+# module "cloud_run_backend" {
+#   source  = "../../modules/cloud-run"
+#   project_id = var.project_id
+#   env        = local.env
+#   region     = var.region
+#   image      = var.backend_image
+# }
+
+# ─── Phase 3: Cloud Run — Frontend ────────────────────────────────────────────
+# module "cloud_run_frontend" {
+#   source  = "../../modules/cloud-run"
+#   project_id = var.project_id
+#   env        = local.env
+#   region     = var.region
+#   image      = var.frontend_image
+# }
+
+# ─── Phase 5: Vertex AI ───────────────────────────────────────────────────────
+# module "vertex_ai" {
+#   source  = "../../modules/vertex-ai"
+#   project_id = var.project_id
+#   env        = local.env
+#   region     = var.region
+# }

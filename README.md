@@ -76,14 +76,16 @@ enterprise-ai-platform/
 │       └── utils/                  # Formatters, constants
 ├── terraform/
 │   ├── modules/                    # Reusable GCP resource modules
-│   │   ├── cloud-run/
-│   │   ├── cloud-storage/
-│   │   ├── vertex-ai/
-│   │   └── networking/
-│   └── environments/               # Per-environment compositions
-│       ├── dev/
-│       ├── staging/
-│       └── prod/
+│   │   ├── cloud-run/              #   Phase 3: Cloud Run service
+│   │   ├── cloud-storage/          # ✅ Phase 2: GCS bucket (production-hardened)
+│   │   ├── vertex-ai/              #   Phase 5: Vertex AI Vector Search
+│   │   └── networking/             #   Phase 4: VPC, subnets, serverless connector
+│   ├── environments/               # Per-environment compositions
+│   │   ├── dev/                    # ✅ Active — documents_bucket provisioned
+│   │   ├── staging/                #   (future)
+│   │   └── prod/                   #   (future)
+│   ├── tests/                      # Future Terratest integration tests (Go)
+│   └── .tflint.hcl                 # TFLint static analysis config
 ├── docs/
 │   ├── architecture/               # Architecture Decision Records (ADRs)
 │   ├── api/                        # OpenAPI / endpoint documentation
@@ -124,6 +126,7 @@ enterprise-ai-platform/
 - Python 3.12+
 - Google Cloud SDK (`gcloud`)
 - Terraform 1.7+
+- TFLint ([install guide](https://github.com/terraform-linters/tflint#installation))
 
 ### Local Development
 
@@ -154,6 +157,103 @@ GCP_REGION=us-central1
 GCS_BUCKET_NAME=enterprise-ai-documents
 VERTEX_MODEL_ID=gemini-1.5-pro-002
 ```
+
+---
+
+## Terraform
+
+### Infrastructure Quality Gates
+
+Every `terraform/**` change runs through four automated gates in Cloud Build
+before a plan (and optionally an apply) is allowed:
+
+| Step | Tool | What it checks | Credentials needed |
+|------|------|----------------|--------------------|
+| 1 | `terraform fmt -check` | Canonical formatting | None |
+| 2 | `terraform validate` | Syntax + schema | Provider init only |
+| 3 | **TFLint** | Naming, best practices, GCP rules | None |
+| 4 | `terraform plan` | Full diff against state | GCP SA |
+
+Upcoming gates (see roadmap below):
+
+| Step | Tool | Status |
+|------|------|--------|
+| 5 | Terratest | Planned — after modules complete |
+| 6 | Checkov | Planned — security & compliance |
+| 7 | tfsec / Trivy IaC | Planned — CVE + secret scanning |
+| 8 | Infracost | Planned — cost delta in PRs |
+
+### TFLint
+
+TFLint is configured in [`terraform/.tflint.hcl`](terraform/.tflint.hcl) with
+two plugins:
+
+- **`terraform` plugin** — naming conventions, `required_version`, deprecated
+  interpolation syntax, unused declarations
+- **`google` plugin** — GCP-specific rules: invalid resource names, unsupported
+  regions, deprecated attributes on `google_*` resources
+
+Neither plugin makes live API calls — both are pure HCL static analysis.
+
+#### Install TFLint
+
+```bash
+# macOS
+brew install tflint
+
+# Linux / CI (manual)
+curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+# Verify
+tflint --version
+```
+
+#### Initialize plugins (first time, and after version bumps)
+
+```bash
+cd terraform
+tflint --init
+```
+
+This downloads the `google` and `terraform` plugins declared in `.tflint.hcl`
+into `~/.tflint.d/plugins/`. Re-run any time you bump a plugin version.
+
+#### Run TFLint
+
+```bash
+# Lint all modules and environments in one pass (recommended)
+cd terraform
+tflint --recursive
+
+# Lint a specific directory only
+tflint --chdir=terraform/modules/cloud-storage
+
+# Compact output — one line per finding (matches Cloud Build format)
+tflint --recursive --format=compact
+
+# Show all rules being evaluated
+tflint --recursive --loglevel=debug
+```
+
+#### Update plugins
+
+```bash
+# 1. Edit terraform/.tflint.hcl — bump the version field for the plugin
+# 2. Re-initialise to pull the new binary
+cd terraform
+tflint --init
+
+# 3. Run to verify no new findings are introduced
+tflint --recursive
+```
+
+### Terratest (future)
+
+The [`terraform/tests/`](terraform/tests/) directory is reserved for
+[Terratest](https://terratest.gruntwork.io/) — Go-based integration tests that
+provision real GCP resources, assert against them, and tear down. See
+[`terraform/tests/README.md`](terraform/tests/README.md) for the planned test
+matrix and CI integration design.
 
 ---
 

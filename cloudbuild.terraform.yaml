@@ -15,7 +15,6 @@
 # Required Cloud Build SA roles:
 #   roles/storage.admin   (Terraform state bucket + managed buckets)
 #   roles/iam.serviceAccountUser (if creating SAs via Terraform)
-
 # ─────────────────────────────────────────────────────────────────────────────
 
 substitutions:

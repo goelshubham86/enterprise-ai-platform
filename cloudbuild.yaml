@@ -64,7 +64,7 @@ steps:
   - name: hashicorp/terraform:1.9
     id: tf-init
     dir: terraform/environments/${_ENV}
-    entrypoint: bash
+    entrypoint: sh
     args:
       - -c
       - |
@@ -80,7 +80,7 @@ steps:
   - name: hashicorp/terraform:1.9
     id: tf-validate
     dir: terraform/environments/${_ENV}
-    entrypoint: bash
+    entrypoint: sh
     args:
       - -c
       - |
@@ -116,7 +116,7 @@ steps:
   - name: hashicorp/terraform:1.9
     id: tf-plan
     dir: terraform/environments/${_ENV}
-    entrypoint: bash
+    entrypoint: sh
     args:
       - -c
       - |
@@ -137,7 +137,7 @@ steps:
   - name: hashicorp/terraform:1.9
     id: tf-apply
     dir: terraform/environments/${_ENV}
-    entrypoint: bash
+    entrypoint: sh
     args:
       - -c
       - |

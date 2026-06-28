@@ -59,3 +59,8 @@ application_default_credentials.json
 # ─── Logs ──────────────────────────────────────────────────────
 *.log
 logs/
+
+# ─── ChromaDB ───────────────────────────────────────────────────
+# Ignore database files; keep the directory itself via .gitkeep
+backend/data/chroma/*.sqlite3
+backend/data/chroma/*/

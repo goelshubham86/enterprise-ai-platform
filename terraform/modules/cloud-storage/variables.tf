@@ -36,8 +36,8 @@ variable "location" {
     Bucket location. Use a multi-region (US, EU, ASIA) for high availability
     or a single region (us-central1) to keep data co-located with Cloud Run.
   EOT
-  type    = string
-  default = "US-CENTRAL1"
+  type        = string
+  default     = "US-CENTRAL1"
 }
 
 variable "storage_class" {
@@ -75,8 +75,8 @@ variable "force_destroy" {
     Allow Terraform to destroy a non-empty bucket. Set true only in dev/sandbox.
     Never true in staging or prod.
   EOT
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
 }
 
 # ─── Access Control ───────────────────────────────────────────

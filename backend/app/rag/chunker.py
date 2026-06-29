@@ -51,7 +51,7 @@ class DocumentChunker:
         text: str,
         document_id: str,
         document_name: str,
-        source_path: str,
+        source_uri: str,
         page_number: int = 0,
     ) -> list[DocumentChunk]:
         """Split text and attach full provenance metadata to each chunk.
@@ -60,7 +60,7 @@ class DocumentChunker:
             text: Raw extracted text from one page or the full document.
             document_id: UUID of the parent document.
             document_name: Human-readable filename (for citations).
-            source_path: GCS URI or local path (for audit trail).
+            source_uri: GCS URI (gs://...) for the original PDF.
             page_number: 0-indexed page number from the PDF parser.
 
         Returns:
@@ -79,7 +79,7 @@ class DocumentChunker:
             metadata = ChunkMetadata(
                 document_id=document_id,
                 document_name=document_name,
-                source_path=source_path,
+                source_uri=source_uri,
                 page_number=page_number,
                 created_at=created_at,
                 chunk_id=chunk_id,
@@ -101,7 +101,7 @@ class DocumentChunker:
         pages: list[str],
         document_id: str,
         document_name: str,
-        source_path: str,
+        source_uri: str,
     ) -> list[DocumentChunk]:
         """Convenience wrapper for multi-page documents.
 
@@ -109,7 +109,7 @@ class DocumentChunker:
             pages: List of extracted page texts in page order.
             document_id: UUID of the parent document.
             document_name: Human-readable filename.
-            source_path: GCS URI or local path.
+            source_uri: GCS URI (gs://...) for the original PDF.
 
         Returns:
             Flat list of all chunks across all pages, with correct page_number
@@ -121,7 +121,7 @@ class DocumentChunker:
                 text=page_text,
                 document_id=document_id,
                 document_name=document_name,
-                source_path=source_path,
+                source_uri=source_uri,
                 page_number=page_number,
             )
             all_chunks.extend(page_chunks)

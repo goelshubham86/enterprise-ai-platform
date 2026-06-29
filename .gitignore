@@ -52,6 +52,9 @@ frontend/coverage/
 .DS_Store
 Thumbs.db
 
+# ─── Cursor ─────────────────────────────────────────────────────
+.cursor/
+
 # ─── Google Cloud ──────────────────────────────────────────────
 gcloud-service-key.json
 application_default_credentials.json
@@ -64,3 +67,4 @@ logs/
 # Ignore database files; keep the directory itself via .gitkeep
 backend/data/chroma/*.sqlite3
 backend/data/chroma/*/
+backend/data/chroma-dev/

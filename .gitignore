@@ -53,9 +53,7 @@ frontend/coverage/
 Thumbs.db
 
 # ─── Cursor ─────────────────────────────────────────────────────
-# Keep .cursor/rules/ (shared team conventions) but ignore everything else
-.cursor/*
-!.cursor/rules/
+.cursor/
 
 # ─── Google Cloud ──────────────────────────────────────────────
 gcloud-service-key.json

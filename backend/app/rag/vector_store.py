@@ -25,11 +25,14 @@ class ChunkMetadata:
 
     Populated by DocumentChunker and persisted in ChromaDB / Vertex AI.
     Enables source citations, per-document deletion, and audit trails.
+
+    source_uri holds the GCS URI (gs://bucket/documents/{id}/{file})
+    for the original PDF. Used for audit trails and re-indexing.
     """
 
     document_id: str
     document_name: str
-    source_path: str
+    source_uri: str
     page_number: int
     created_at: str
 

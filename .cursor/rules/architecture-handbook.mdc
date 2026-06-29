@@ -1,0 +1,52 @@
+---
+description: Remind the user to create the next Architecture Handbook document after every major architectural decision
+alwaysApply: true
+---
+
+# Architecture Handbook Reminder
+
+After completing any major architectural decision, remind the user:
+
+> "This is a good point to create the next Architecture Handbook document.
+> Save it to: ~/Documents/AI-Platform-Architecture-Notes/
+> Suggested filename: [next number]-[Topic]-Architecture.docx"
+
+## What Triggers a Reminder
+
+A major architectural decision includes any of the following:
+
+- Choosing or changing a technology (vector DB, LLM, framework, cloud service)
+- Designing a new abstraction layer or interface
+- Implementing a new design pattern across the codebase
+- Completing a new Terraform module for a GCP service
+- Wiring a new CI/CD pipeline or adding a quality gate
+- Making a significant infrastructure decision (networking, IAM, scaling)
+
+## Handbook Numbering
+
+The documents are numbered sequentially. Current plan:
+
+| # | Document | When |
+|---|----------|------|
+| 01 | 01-ChromaDB-Architecture.docx | ✅ Done |
+| 02 | 02-RAG-Architecture.docx | After RAG pipeline (Phase 3) |
+| 03 | 03-LangChain-Architecture.docx | After LangChain chains (Phase 3) |
+| 04 | 04-LangGraph-Architecture.docx | After LangGraph agents (Phase 4) |
+| 05 | 05-MCP-Architecture.docx | After MCP integration (Phase 5) |
+| 06 | 06-Cloud-Run-Architecture.docx | After Cloud Run module (Phase 3) |
+| 07 | 07-Terraform-Architecture.docx | After Terraform modules complete |
+| 08 | 08-Cloud-Build-Architecture.docx | After CI/CD is fully wired |
+| 09 | 09-Vertex-AI-Architecture.docx | After Vertex AI Vector Search (Phase 5) |
+| 10 | 10-Observability-and-Evaluation.docx | Phase 6 |
+| 11 | 11-Security-and-IAM.docx | Phase 6 |
+| 12 | 12-System-Design-and-Tradeoffs.docx | Final |
+
+## Document Goal
+
+These are interview-quality architecture notes, not project documentation.
+Audience: preparing for Senior AI Engineer, GenAI Architect, Principal AI Engineer,
+and AI Platform Architect interviews.
+
+Each document must include: executive summary, problem statement, why this approach,
+architecture overview, deep dive, design patterns, alternatives comparison,
+migration strategy, production considerations, and interview Q&A.

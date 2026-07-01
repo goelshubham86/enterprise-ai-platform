@@ -45,7 +45,14 @@ class Settings(BaseSettings):
 
     # ─── Application ──────────────────────────────────────────────────────────
     app_env: str = "development"
-    cors_origins: list[str] = ["http://localhost:3000"]
+    # Default includes known Cloud Run frontend URL so CORS works even when
+    # CORS_ORIGINS is not explicitly set in the Cloud Run environment.
+    # Override via CORS_ORIGINS env var (JSON array) for other environments.
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://enterprise-ai-frontend-611331021574.us-central1.run.app",
+    ]
     log_level: str = "INFO"
 
     # ─── Ingestion: file validation ────────────────────────────────────────────

@@ -99,7 +99,7 @@ steps:
       # Cloud Run's default HTTP probe hits GET / which returns 404 on FastAPI
       # unless a root handler exists.  We set the probe to /api/v1/health and
       # give the container 60 s to start (service deps: Vertex AI + ChromaDB).
-      - --startup-cpu-boost
+      - --cpu-boost
       - --startup-probe=httpGet.path=/api/v1/health,periodSeconds=10,failureThreshold=6,initialDelaySeconds=5
     waitFor: [backend-push]
 

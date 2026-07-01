@@ -230,7 +230,7 @@ steps:
             --min-instances=1 \
             --max-instances=10 \
             --set-env-vars="GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},APP_ENV=${_ENV},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME},GCS_UPLOAD_PREFIX=${_GCS_UPLOAD_PREFIX},CHROMA_PERSIST_DIR=${_CHROMA_PERSIST_DIR},CHROMA_COLLECTION_NAME=${_CHROMA_COLLECTION_NAME}" \
-            --startup-cpu-boost \
+            --cpu-boost \
             --startup-probe="httpGet.path=/api/v1/health,periodSeconds=10,failureThreshold=6,initialDelaySeconds=5"
         else
           echo "Skipping backend Cloud Run deploy"

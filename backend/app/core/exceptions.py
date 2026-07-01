@@ -128,3 +128,12 @@ class VectorStoreError(InfrastructureError):
         - Disk quota exceeded on the persist directory
         - Collection was deleted externally while the service was running
     """
+
+
+class ServiceNotReadyError(InfrastructureError):
+    """A request arrived before background service initialization completed.
+
+    Returned when vector store, storage service, or PDF service is still
+    being initialized. Maps to HTTP 503 Service Unavailable with a
+    Retry-After header so clients know to back off and retry.
+    """

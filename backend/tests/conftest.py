@@ -199,7 +199,19 @@ def processing_result(document_id: str, document_name: str) -> ProcessingResult:
 
 @asynccontextmanager
 async def _null_lifespan(_app):
-    """No-op lifespan used in tests to bypass GCP service initialisation."""
+    """No-op lifespan that simulates a fully-initialised application.
+
+    Sets the same app.state attributes that the real lifespan populates so
+    that health checks and dependency guards see a consistent "ready" state.
+    Service singletons are left as None because endpoints that need them
+    either use dependency_overrides (upload tests) or don't touch services
+    at all (health, list, delete stubs).
+    """
+    _app.state.vector_store = None
+    _app.state.storage_service = None
+    _app.state.pdf_service = None
+    _app.state._services_ready = True
+    _app.state._init_error = None
     yield
 
 

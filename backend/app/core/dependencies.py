@@ -31,6 +31,7 @@ from __future__ import annotations
 from fastapi import Request
 
 from app.core.config import settings
+from app.core.exceptions import ServiceNotReadyError
 from app.rag.chunker import DocumentChunker
 from app.rag.vector_store import VectorStore
 from app.services.ingestion_service import IngestionService
@@ -39,6 +40,10 @@ from app.services.storage_service import StorageService
 
 
 # ─── Singleton providers (read from app.state) ────────────────────────────────
+#
+# All three singleton providers guard against None — app.state is populated by
+# a background asyncio task that starts after the lifespan yields.  If a request
+# arrives before init completes, ServiceNotReadyError → HTTP 503 with Retry-After.
 
 
 def get_vector_store(request: Request) -> VectorStore:
@@ -52,7 +57,13 @@ def get_vector_store(request: Request) -> VectorStore:
         2. Change the assignment in main.py lifespan
         3. Nothing here changes
     """
-    return request.app.state.vector_store
+    store = request.app.state.vector_store
+    if store is None:
+        raise ServiceNotReadyError(
+            "Vector store is not yet initialised. Services start in the background — "
+            "please retry in a moment."
+        )
+    return store
 
 
 def get_storage_service(request: Request) -> StorageService:
@@ -61,7 +72,13 @@ def get_storage_service(request: Request) -> StorageService:
     The GCS client is expensive to create — one instance per application
     lifetime is the correct pattern.
     """
-    return request.app.state.storage_service
+    svc = request.app.state.storage_service
+    if svc is None:
+        raise ServiceNotReadyError(
+            "Storage service is not yet initialised. Services start in the background — "
+            "please retry in a moment."
+        )
+    return svc
 
 
 def get_pdf_service(request: Request) -> PDFService:
@@ -69,7 +86,13 @@ def get_pdf_service(request: Request) -> PDFService:
 
     PDFService is stateless between calls — shared safely across requests.
     """
-    return request.app.state.pdf_service
+    svc = request.app.state.pdf_service
+    if svc is None:
+        raise ServiceNotReadyError(
+            "PDF service is not yet initialised. Services start in the background — "
+            "please retry in a moment."
+        )
+    return svc
 
 
 # ─── Per-request providers ────────────────────────────────────────────────────

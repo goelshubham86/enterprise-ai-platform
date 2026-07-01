@@ -18,6 +18,7 @@ from app.core.exceptions import (
     InfrastructureError,
     InvalidPDFError,
     PlatformError,
+    ServiceNotReadyError,
     StorageError,
     VectorStoreError,
 )
@@ -34,98 +35,132 @@ logger = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Initialise and tear down application-scoped resources.
 
-    Resources created here are stored in app.state and accessed via
-    FastAPI's dependency injection system (app/core/dependencies.py).
+    Cloud Run startup probe strategy
+    ---------------------------------
+    uvicorn binds port 8080 only AFTER the lifespan coroutine yields.
+    If the yield is placed after blocking GCP initialisation, the startup
+    probe receives CONNECTION_REFUSED for the full init duration and the
+    deployment fails.
 
-    Startup order matters:
-        1. Logging (must be first — all other initialisations log to it)
-        2. EmbeddingService (passed into VectorStore constructor)
-        3. VectorStore (depends on EmbeddingService)
-        4. StorageService (independent of VectorStore)
-        5. PDFService (stateless, no external dependencies)
+    Fix: schedule all service initialisation in a background asyncio task,
+    then yield immediately.  uvicorn binds the socket and answers the probe
+    within milliseconds.  Services become available as the background task
+    completes (typically 5–30 s).
 
-    To swap implementations (e.g. Phase 5 migration to Vertex AI):
-        - VectorStore: replace ChromaVectorStore with VertexAIVectorStore here
-        - EmbeddingService: replace VertexAIEmbeddingService with any Embeddings impl
-        - StorageService: no changes expected (GCS stays in Phase 5)
+    Request handling during background init
+    ----------------------------------------
+    Endpoints that depend on a service (upload, etc.) call dependency
+    providers (get_vector_store, get_storage_service, get_pdf_service) which
+    raise ServiceNotReadyError → HTTP 503 if app.state is still None.
+    The health endpoint returns status="starting" during this window.
+
+    To swap implementations (e.g. Phase 5 → Vertex AI Vector Search):
+        - Change the concrete type constructed inside _init_services()
+        - Nothing in dependencies.py or the endpoints changes
     """
-    # 1. Configure structured logging before anything else logs
     configure_logging(level=settings.log_level)
 
+    # Initialise state with None / False defaults before yielding.
+    # Background task fills these in; dependency guards check them.
+    _app.state.vector_store = None
+    _app.state.storage_service = None
+    _app.state.pdf_service = None
+    _app.state._services_ready = False
+    _app.state._init_error = None
+
+    async def _init_services() -> None:
+        """Blocking GCP service setup, run in background after yield.
+
+        Each blocking call is wrapped in asyncio.to_thread() so the event
+        loop stays free to handle health probes while init is in progress.
+        Startup order:
+            1. EmbeddingService  (passed to VectorStore)
+            2. VectorStore       (depends on EmbeddingService)
+            3. StorageService    (independent)
+            4. PDFService        (stateless, no I/O)
+        """
+        try:
+            from app.rag.embedding_service import VertexAIEmbeddingService
+
+            logger.info(
+                "Initialising embedding service",
+                extra={"model": settings.vertex_embedding_model, "project": settings.gcp_project_id},
+            )
+            embedding_service = await asyncio.to_thread(
+                lambda: VertexAIEmbeddingService(
+                    model=settings.vertex_embedding_model,
+                    project=settings.gcp_project_id,
+                )
+            )
+            logger.info("Embedding service ready")
+
+            from app.rag.chroma_store import ChromaVectorStore
+
+            logger.info(
+                "Initialising vector store",
+                extra={
+                    "backend": "ChromaDB",
+                    "persist_dir": settings.chroma_persist_dir,
+                    "collection": settings.chroma_collection_name,
+                },
+            )
+            _app.state.vector_store = await asyncio.to_thread(
+                lambda: ChromaVectorStore(
+                    persist_dir=settings.chroma_persist_dir,
+                    collection_name=settings.chroma_collection_name,
+                    embeddings=embedding_service.get_embeddings(),
+                )
+            )
+            logger.info("Vector store ready")
+
+            from app.services.storage_service import StorageService
+
+            logger.info(
+                "Initialising storage service",
+                extra={"bucket": settings.gcs_bucket_name, "prefix": settings.gcs_upload_prefix},
+            )
+            _app.state.storage_service = await asyncio.to_thread(
+                lambda: StorageService(
+                    bucket_name=settings.gcs_bucket_name,
+                    project=settings.gcp_project_id,
+                    upload_prefix=settings.gcs_upload_prefix,
+                )
+            )
+            logger.info("Storage service ready")
+
+            from app.services.pdf_service import PDFService
+
+            _app.state.pdf_service = PDFService()
+
+            _app.state._services_ready = True
+            logger.info("All services initialised — application fully ready")
+
+        except Exception as exc:
+            _app.state._init_error = str(exc)
+            logger.error(
+                "Service initialisation failed",
+                extra={"error": str(exc)},
+                exc_info=True,
+            )
+
+    # Yield BEFORE init completes → uvicorn binds 8080 → probe gets 200.
+    init_task = asyncio.create_task(_init_services())
     logger.info(
-        "Application starting",
+        "Application starting — services initialising in background",
         extra={"env": settings.app_env, "log_level": settings.log_level},
     )
 
-    # ── All service initialisations are blocking (I/O or gRPC setup).
-    # Running them in asyncio.to_thread() keeps the event loop free so
-    # Cloud Run's startup probe can reach the health endpoint while services
-    # are still initialising.  The app.state attributes are set before yield
-    # so endpoints that depend on them won't be called until startup completes.
-
-    # 2. Embedding service (may initialise gRPC channel to Vertex AI)
-    from app.rag.embedding_service import VertexAIEmbeddingService
-
-    logger.info(
-        "Initialising embedding service",
-        extra={"model": settings.vertex_embedding_model, "project": settings.gcp_project_id},
-    )
-
-    def _init_embedding_service() -> VertexAIEmbeddingService:
-        return VertexAIEmbeddingService(
-            model=settings.vertex_embedding_model,
-            project=settings.gcp_project_id,
-        )
-
-    embedding_service = await asyncio.to_thread(_init_embedding_service)
-
-    # 3. Vector store (opens SQLite via chromadb.PersistentClient)
-    from app.rag.chroma_store import ChromaVectorStore
-
-    logger.info(
-        "Initialising vector store",
-        extra={
-            "backend": "ChromaDB",
-            "persist_dir": settings.chroma_persist_dir,
-            "collection": settings.chroma_collection_name,
-        },
-    )
-
-    def _init_vector_store() -> ChromaVectorStore:
-        return ChromaVectorStore(
-            persist_dir=settings.chroma_persist_dir,
-            collection_name=settings.chroma_collection_name,
-            embeddings=embedding_service.get_embeddings(),
-        )
-
-    _app.state.vector_store = await asyncio.to_thread(_init_vector_store)
-
-    # 4. Storage service (fetches ADC credentials from metadata server on Cloud Run)
-    from app.services.storage_service import StorageService
-
-    logger.info(
-        "Initialising storage service",
-        extra={"bucket": settings.gcs_bucket_name, "prefix": settings.gcs_upload_prefix},
-    )
-
-    def _init_storage_service() -> StorageService:
-        return StorageService(
-            bucket_name=settings.gcs_bucket_name,
-            project=settings.gcp_project_id,
-            upload_prefix=settings.gcs_upload_prefix,
-        )
-
-    _app.state.storage_service = await asyncio.to_thread(_init_storage_service)
-
-    # 5. PDF service (stateless, no I/O on init — no thread needed)
-    from app.services.pdf_service import PDFService
-
-    _app.state.pdf_service = PDFService()
-
-    logger.info("Application startup complete")
     yield
 
-    logger.info("Application shutdown")
+    # Graceful shutdown: cancel the init task if it is still running.
+    if not init_task.done():
+        init_task.cancel()
+        try:
+            await init_task
+        except asyncio.CancelledError:
+            pass
+
+    logger.info("Application shutdown complete")
 
 
 # ─── FastAPI application ───────────────────────────────────────────────────────
@@ -181,6 +216,16 @@ async def handle_file_too_large(request: Request, exc: FileTooLargeError) -> JSO
     return JSONResponse(
         status_code=413,
         content={"detail": exc.message, "error_code": "FILE_TOO_LARGE"},
+    )
+
+
+@app.exception_handler(ServiceNotReadyError)
+async def handle_service_not_ready(request: Request, exc: ServiceNotReadyError) -> JSONResponse:
+    logger.warning("Request rejected — services still initialising")
+    return JSONResponse(
+        status_code=503,
+        content={"detail": exc.message, "error_code": "SERVICE_NOT_READY"},
+        headers={"Retry-After": "10"},
     )
 
 

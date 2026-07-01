@@ -25,12 +25,6 @@ module "documents_bucket" {
   env        = local.env
   location   = var.region
 
-  # Fixed name so Cloud Build config and the bucket are always in sync.
-  # The default {project_id}-{name}-{env} would produce
-  # "charles-schwab-poc-465918-documents-dev", which doesn't match the
-  # GCS_BUCKET_NAME substitution used in cloudbuild.backend.yaml.
-  bucket_name_override = "enterprise-ai-documents-dev"
-
   storage_class      = "STANDARD"
   versioning_enabled = true
   force_destroy      = true # safe for dev; always false in staging and prod

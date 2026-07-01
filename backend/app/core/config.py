@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     gcp_region: str = "us-central1"
 
     # ─── Cloud Storage ────────────────────────────────────────────────────────
-    gcs_bucket_name: str = "enterprise-ai-documents"
+    # Bucket name follows Terraform convention: {project_id}-documents-{env}
+    gcs_bucket_name: str = "charles-schwab-poc-465918-documents-dev"
     # Prefix (folder) under which all uploaded PDFs are stored.
     # Final GCS path: {gcs_upload_prefix}/{document_id}/{filename}
     gcs_upload_prefix: str = "documents"

@@ -25,8 +25,9 @@ substitutions:
   _AR_REPO: enterprise-ai-platform
   _SERVICE_BACKEND: enterprise-ai-backend
   # Cloud Storage bucket that holds uploaded PDFs.
-  # Override this substitution in the Cloud Build trigger config.
-  _GCS_BUCKET_NAME: enterprise-ai-documents-dev
+  # Name follows the Terraform convention: {project_id}-documents-{env}.
+  # Override in the Cloud Build trigger config if the project changes.
+  _GCS_BUCKET_NAME: charles-schwab-poc-465918-documents-dev
   _GCS_UPLOAD_PREFIX: documents-dev
   # ChromaDB persistence directory inside the container.
   # /tmp is always writable on Cloud Run (ephemeral between restarts).

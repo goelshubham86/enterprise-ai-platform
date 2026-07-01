@@ -49,7 +49,7 @@ substitutions:
   _AR_REPO: enterprise-ai-platform
   _SERVICE_BACKEND: enterprise-ai-backend
   _SERVICE_FRONTEND: enterprise-ai-frontend
-  _GCS_BUCKET_NAME: enterprise-ai-documents-dev
+  _GCS_BUCKET_NAME: charles-schwab-poc-465918-documents-dev
   _GCS_UPLOAD_PREFIX: documents-dev
   _CHROMA_PERSIST_DIR: /tmp/chroma
   _CHROMA_COLLECTION_NAME: documents-dev

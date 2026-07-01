@@ -53,6 +53,10 @@ substitutions:
   _GCS_UPLOAD_PREFIX: documents-dev
   _CHROMA_PERSIST_DIR: /tmp/chroma
   _CHROMA_COLLECTION_NAME: documents-dev
+  # Cross-origin URLs — Vite bakes BACKEND_URL into the React bundle;
+  # FRONTEND_URL is added to the backend's CORS allow-list.
+  _BACKEND_URL: https://enterprise-ai-backend-611331021574.us-central1.run.app
+  _FRONTEND_URL: https://enterprise-ai-frontend-611331021574.us-central1.run.app
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -229,7 +233,7 @@ steps:
             --cpu=2 \
             --min-instances=1 \
             --max-instances=10 \
-            --set-env-vars="GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},APP_ENV=${_ENV},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME},GCS_UPLOAD_PREFIX=${_GCS_UPLOAD_PREFIX},CHROMA_PERSIST_DIR=${_CHROMA_PERSIST_DIR},CHROMA_COLLECTION_NAME=${_CHROMA_COLLECTION_NAME}" \
+            --set-env-vars="^;^GCP_PROJECT_ID=$PROJECT_ID;GCP_REGION=${_REGION};APP_ENV=${_ENV};GCS_BUCKET_NAME=${_GCS_BUCKET_NAME};GCS_UPLOAD_PREFIX=${_GCS_UPLOAD_PREFIX};CHROMA_PERSIST_DIR=${_CHROMA_PERSIST_DIR};CHROMA_COLLECTION_NAME=${_CHROMA_COLLECTION_NAME};CORS_ORIGINS=[\"${_FRONTEND_URL}\",\"http://localhost:3000\",\"http://localhost:5173\"]" \
             --cpu-boost \
             --startup-probe="httpGet.path=/api/v1/health,periodSeconds=10,failureThreshold=6,initialDelaySeconds=5"
         else
@@ -244,9 +248,13 @@ steps:
 # ─────────────────────────────────────────────────────────────
 
   # 3a. npm ci + Vite build
+  # VITE_API_URL is injected so Vite bakes the backend URL into the bundle.
+  # Without it the React client falls back to localhost:8000 in production.
   - name: node:20-slim
     id: frontend-build
     dir: frontend
+    env:
+      - VITE_API_URL=${_BACKEND_URL}
     entrypoint: bash
     args:
       - -c

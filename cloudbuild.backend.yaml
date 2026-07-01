@@ -33,6 +33,11 @@ substitutions:
   # For a persistent store, mount a Cloud Storage FUSE volume here.
   _CHROMA_PERSIST_DIR: /tmp/chroma
   _CHROMA_COLLECTION_NAME: documents-dev
+  # CORS: URL of the deployed frontend Cloud Run service.
+  # Added to the backend's CORS_ORIGINS list so the browser allows
+  # cross-origin API calls from the React app.
+  # Override in the Cloud Build trigger if the project number changes.
+  _FRONTEND_URL: https://enterprise-ai-frontend-611331021574.us-central1.run.app
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -93,8 +98,12 @@ steps:
       # GCP_PROJECT_ID, GCP_REGION, APP_ENV are always set from build context.
       # GCS_BUCKET_NAME, CHROMA_*, VERTEX_* use substitution defaults above;
       # override them in the Cloud Build trigger's substitution variables.
+      #
+      # CORS_ORIGINS is a JSON array (pydantic-settings list[str]).
+      # The ^;^ prefix tells gcloud to use ; as the key-value delimiter so
+      # that commas inside the JSON array are not mis-parsed as separators.
       - >-
-        --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},APP_ENV=${_ENV},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME},GCS_UPLOAD_PREFIX=${_GCS_UPLOAD_PREFIX},CHROMA_PERSIST_DIR=${_CHROMA_PERSIST_DIR},CHROMA_COLLECTION_NAME=${_CHROMA_COLLECTION_NAME}
+        --set-env-vars=^;^GCP_PROJECT_ID=$PROJECT_ID;GCP_REGION=${_REGION};APP_ENV=${_ENV};GCS_BUCKET_NAME=${_GCS_BUCKET_NAME};GCS_UPLOAD_PREFIX=${_GCS_UPLOAD_PREFIX};CHROMA_PERSIST_DIR=${_CHROMA_PERSIST_DIR};CHROMA_COLLECTION_NAME=${_CHROMA_COLLECTION_NAME};CORS_ORIGINS=["${_FRONTEND_URL}","http://localhost:3000","http://localhost:5173"]
       # ── Startup probe ─────────────────────────────────────────
       # Cloud Run's default HTTP probe hits GET / which returns 404 on FastAPI
       # unless a root handler exists.  We set the probe to /api/v1/health and

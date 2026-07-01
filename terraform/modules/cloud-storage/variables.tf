@@ -10,6 +10,7 @@ variable "name" {
     Logical bucket name (suffix). The final bucket name is:
       {project_id}-{name}-{env}
     Must be lowercase letters, numbers, and hyphens only.
+    Ignored when bucket_name_override is set.
   EOT
   type        = string
 
@@ -17,6 +18,16 @@ variable "name" {
     condition     = can(regex("^[a-z0-9-]+$", var.name))
     error_message = "name must contain only lowercase letters, numbers, and hyphens."
   }
+}
+
+variable "bucket_name_override" {
+  description = <<-EOT
+    Override the generated bucket name entirely. Use when you need a specific
+    globally-unique name (e.g. "enterprise-ai-documents-dev") instead of the
+    default {project_id}-{name}-{env} pattern. Leave null to use the default.
+  EOT
+  type        = string
+  default     = null
 }
 
 variable "env" {

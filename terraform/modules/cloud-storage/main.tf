@@ -25,7 +25,11 @@ terraform {
 }
 
 locals {
-  bucket_name = "${var.project_id}-${var.name}-${var.env}"
+  # If bucket_name_override is set, use it verbatim (allows pre-created buckets
+  # like "enterprise-ai-documents-dev" to be managed by Terraform without
+  # forcing the {project_id}-{name}-{env} convention).
+  # Leave null to keep the default {project_id}-{name}-{env} naming.
+  bucket_name = coalesce(var.bucket_name_override, "${var.project_id}-${var.name}-${var.env}")
 
   # Merge caller-supplied labels with mandatory standard labels
   labels = merge(

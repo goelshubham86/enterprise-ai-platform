@@ -49,6 +49,10 @@ substitutions:
   _AR_REPO: enterprise-ai-platform
   _SERVICE_BACKEND: enterprise-ai-backend
   _SERVICE_FRONTEND: enterprise-ai-frontend
+  _GCS_BUCKET_NAME: enterprise-ai-documents-dev
+  _GCS_UPLOAD_PREFIX: documents-dev
+  _CHROMA_PERSIST_DIR: /tmp/chroma
+  _CHROMA_COLLECTION_NAME: documents-dev
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -225,7 +229,9 @@ steps:
             --cpu=2 \
             --min-instances=1 \
             --max-instances=10 \
-            --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},APP_ENV=${_ENV}
+            --set-env-vars="GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},APP_ENV=${_ENV},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME},GCS_UPLOAD_PREFIX=${_GCS_UPLOAD_PREFIX},CHROMA_PERSIST_DIR=${_CHROMA_PERSIST_DIR},CHROMA_COLLECTION_NAME=${_CHROMA_COLLECTION_NAME}" \
+            --startup-cpu-boost \
+            --startup-probe="httpGet.path=/api/v1/health,periodSeconds=10,failureThreshold=6,initialDelaySeconds=5"
         else
           echo "Skipping backend Cloud Run deploy"
         fi

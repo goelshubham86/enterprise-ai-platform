@@ -24,6 +24,15 @@ substitutions:
   _REGION: us-central1
   _AR_REPO: enterprise-ai-platform
   _SERVICE_BACKEND: enterprise-ai-backend
+  # Cloud Storage bucket that holds uploaded PDFs.
+  # Override this substitution in the Cloud Build trigger config.
+  _GCS_BUCKET_NAME: enterprise-ai-documents-dev
+  _GCS_UPLOAD_PREFIX: documents-dev
+  # ChromaDB persistence directory inside the container.
+  # /tmp is always writable on Cloud Run (ephemeral between restarts).
+  # For a persistent store, mount a Cloud Storage FUSE volume here.
+  _CHROMA_PERSIST_DIR: /tmp/chroma
+  _CHROMA_COLLECTION_NAME: documents-dev
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -80,7 +89,18 @@ steps:
       - --cpu=2
       - --min-instances=1
       - --max-instances=10
-      - --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},APP_ENV=${_ENV}
+      # ── Runtime environment variables ─────────────────────────
+      # GCP_PROJECT_ID, GCP_REGION, APP_ENV are always set from build context.
+      # GCS_BUCKET_NAME, CHROMA_*, VERTEX_* use substitution defaults above;
+      # override them in the Cloud Build trigger's substitution variables.
+      - >-
+        --set-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCP_REGION=${_REGION},APP_ENV=${_ENV},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME},GCS_UPLOAD_PREFIX=${_GCS_UPLOAD_PREFIX},CHROMA_PERSIST_DIR=${_CHROMA_PERSIST_DIR},CHROMA_COLLECTION_NAME=${_CHROMA_COLLECTION_NAME}
+      # ── Startup probe ─────────────────────────────────────────
+      # Cloud Run's default HTTP probe hits GET / which returns 404 on FastAPI
+      # unless a root handler exists.  We set the probe to /api/v1/health and
+      # give the container 60 s to start (service deps: Vertex AI + ChromaDB).
+      - --startup-cpu-boost
+      - --startup-probe=httpGet.path=/api/v1/health,periodSeconds=10,failureThreshold=6,initialDelaySeconds=5
     waitFor: [backend-push]
 
 images:

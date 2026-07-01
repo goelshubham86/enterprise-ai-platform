@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -56,19 +57,29 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         extra={"env": settings.app_env, "log_level": settings.log_level},
     )
 
-    # 2. Embedding service
+    # ── All service initialisations are blocking (I/O or gRPC setup).
+    # Running them in asyncio.to_thread() keeps the event loop free so
+    # Cloud Run's startup probe can reach the health endpoint while services
+    # are still initialising.  The app.state attributes are set before yield
+    # so endpoints that depend on them won't be called until startup completes.
+
+    # 2. Embedding service (may initialise gRPC channel to Vertex AI)
     from app.rag.embedding_service import VertexAIEmbeddingService
 
     logger.info(
         "Initialising embedding service",
         extra={"model": settings.vertex_embedding_model, "project": settings.gcp_project_id},
     )
-    embedding_service = VertexAIEmbeddingService(
-        model=settings.vertex_embedding_model,
-        project=settings.gcp_project_id,
-    )
 
-    # 3. Vector store
+    def _init_embedding_service() -> VertexAIEmbeddingService:
+        return VertexAIEmbeddingService(
+            model=settings.vertex_embedding_model,
+            project=settings.gcp_project_id,
+        )
+
+    embedding_service = await asyncio.to_thread(_init_embedding_service)
+
+    # 3. Vector store (opens SQLite via chromadb.PersistentClient)
     from app.rag.chroma_store import ChromaVectorStore
 
     logger.info(
@@ -79,26 +90,34 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             "collection": settings.chroma_collection_name,
         },
     )
-    _app.state.vector_store = ChromaVectorStore(
-        persist_dir=settings.chroma_persist_dir,
-        collection_name=settings.chroma_collection_name,
-        embeddings=embedding_service.get_embeddings(),
-    )
 
-    # 4. Storage service
+    def _init_vector_store() -> ChromaVectorStore:
+        return ChromaVectorStore(
+            persist_dir=settings.chroma_persist_dir,
+            collection_name=settings.chroma_collection_name,
+            embeddings=embedding_service.get_embeddings(),
+        )
+
+    _app.state.vector_store = await asyncio.to_thread(_init_vector_store)
+
+    # 4. Storage service (fetches ADC credentials from metadata server on Cloud Run)
     from app.services.storage_service import StorageService
 
     logger.info(
         "Initialising storage service",
         extra={"bucket": settings.gcs_bucket_name, "prefix": settings.gcs_upload_prefix},
     )
-    _app.state.storage_service = StorageService(
-        bucket_name=settings.gcs_bucket_name,
-        project=settings.gcp_project_id,
-        upload_prefix=settings.gcs_upload_prefix,
-    )
 
-    # 5. PDF service (stateless, no I/O on init)
+    def _init_storage_service() -> StorageService:
+        return StorageService(
+            bucket_name=settings.gcs_bucket_name,
+            project=settings.gcp_project_id,
+            upload_prefix=settings.gcs_upload_prefix,
+        )
+
+    _app.state.storage_service = await asyncio.to_thread(_init_storage_service)
+
+    # 5. PDF service (stateless, no I/O on init — no thread needed)
     from app.services.pdf_service import PDFService
 
     _app.state.pdf_service = PDFService()
@@ -224,3 +243,16 @@ async def handle_platform_error(request: Request, exc: PlatformError) -> JSONRes
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 app.include_router(api_router, prefix="/api/v1")
+
+
+# ─── Root health probe ────────────────────────────────────────────────────────
+#
+# Cloud Run's default HTTP startup probe hits GET /. If the app returns 4xx
+# on that path the container is considered unhealthy and the deployment fails.
+# This minimal endpoint always returns 200 so the probe succeeds even while
+# the full /api/v1/health logic is being evaluated.
+
+
+@app.get("/", include_in_schema=False)
+async def root_health_probe() -> dict:
+    return {"status": "ok"}

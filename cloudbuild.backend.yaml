@@ -89,7 +89,11 @@ steps:
       - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE_BACKEND}:$COMMIT_SHA
       - --region=${_REGION}
       - --platform=managed
-      - --no-allow-unauthenticated
+      # Public access required so the browser-based frontend can call the API.
+      # Cloud Run IAM auth blocks OPTIONS preflight requests before they reach
+      # FastAPI, so CORS middleware never has a chance to respond.
+      # Application-level auth (API keys / JWT) will be added in Phase 3.
+      - --allow-unauthenticated
       - --memory=2Gi
       - --cpu=2
       - --min-instances=1

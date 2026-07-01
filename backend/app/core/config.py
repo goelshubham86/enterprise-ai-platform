@@ -45,9 +45,12 @@ class Settings(BaseSettings):
 
     # ─── Application ──────────────────────────────────────────────────────────
     app_env: str = "development"
-    # Default includes known Cloud Run frontend URL so CORS works even when
-    # CORS_ORIGINS is not explicitly set in the Cloud Run environment.
-    # Override via CORS_ORIGINS env var (JSON array) for other environments.
+    # Allowed CORS origins for the frontend.
+    # The Cloud Run backend must be deployed with --allow-unauthenticated
+    # so that browser OPTIONS preflight requests reach FastAPI before Cloud
+    # Run IAM can reject them. Default includes the production frontend URL
+    # so no CORS_ORIGINS env var is needed in dev deployments.
+    # Override via CORS_ORIGINS env var (JSON array) for staging/prod.
     cors_origins: list[str] = [
         "http://localhost:3000",
         "http://localhost:5173",

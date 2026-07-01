@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -21,17 +21,22 @@ import {
   InsertDriveFileOutlined,
   CheckCircleOutlined,
   ErrorOutlined,
+  HourglassTopOutlined,
 } from '@mui/icons-material';
 import { useDropzone, type FileRejection } from 'react-dropzone';
 import { documentsApi } from '@/api/documents';
 import { formatBytes } from '@/utils/formatters';
 import { MAX_UPLOAD_SIZE_BYTES } from '@/utils/constants';
 
+const SERVICE_NOT_READY_CODE = 'SERVICE_NOT_READY';
+const RETRY_DELAY_MS = 8_000;
+
 interface FileState {
   file: File;
   progress: number;
-  status: 'pending' | 'uploading' | 'done' | 'error';
+  status: 'pending' | 'uploading' | 'done' | 'error' | 'retrying';
   error?: string;
+  retryIn?: number;
 }
 
 interface UploadDialogProps {
@@ -43,6 +48,23 @@ interface UploadDialogProps {
 export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
   const [files, setFiles] = useState<FileState[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const retryTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  // Countdown ticker for files in 'retrying' state
+  useEffect(() => {
+    const hasRetrying = files.some((f) => f.status === 'retrying');
+    if (!hasRetrying) return;
+    const interval = setInterval(() => {
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.status === 'retrying' && f.retryIn !== undefined
+            ? { ...f, retryIn: Math.max(0, f.retryIn - 1) }
+            : f,
+        ),
+      );
+    }, 1_000);
+    return () => clearInterval(interval);
+  }, [files]);
 
   const onDrop = useCallback((accepted: File[], rejected: FileRejection[]) => {
     const newFiles: FileState[] = accepted.map((f) => ({
@@ -68,18 +90,11 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     multiple: true,
   });
 
-  const handleUpload = async () => {
-    const pending = files.filter((f) => f.status === 'pending');
-    if (pending.length === 0) return;
-
-    setIsUploading(true);
-    let allDone = true;
-
-    for (const fileState of pending) {
+  const uploadSingleFile = useCallback(
+    async (fileState: FileState): Promise<boolean> => {
       setFiles((prev) =>
-        prev.map((f) => (f.file === fileState.file ? { ...f, status: 'uploading' } : f)),
+        prev.map((f) => (f.file === fileState.file ? { ...f, status: 'uploading', retryIn: undefined } : f)),
       );
-
       try {
         await documentsApi.upload(fileState.file, (pct) => {
           setFiles((prev) =>
@@ -91,23 +106,56 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
             f.file === fileState.file ? { ...f, status: 'done', progress: 100 } : f,
           ),
         );
+        return true;
       } catch (err) {
-        allDone = false;
+        const msg = (err as Error).message;
+        const isNotReady = msg.includes(SERVICE_NOT_READY_CODE) || msg.toLowerCase().includes('not yet initialised');
+
+        if (isNotReady) {
+          const delaySecs = Math.round(RETRY_DELAY_MS / 1000);
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.file === fileState.file
+                ? { ...f, status: 'retrying', error: undefined, retryIn: delaySecs }
+                : f,
+            ),
+          );
+          // Auto-retry after delay
+          const key = fileState.file.name + fileState.file.size;
+          retryTimers.current.get(key) && clearTimeout(retryTimers.current.get(key));
+          const timer = setTimeout(() => {
+            void uploadSingleFile(fileState);
+          }, RETRY_DELAY_MS);
+          retryTimers.current.set(key, timer);
+          return false;
+        }
+
         setFiles((prev) =>
           prev.map((f) =>
-            f.file === fileState.file
-              ? { ...f, status: 'error', error: (err as Error).message }
-              : f,
+            f.file === fileState.file ? { ...f, status: 'error', error: msg } : f,
           ),
         );
+        return false;
       }
-    }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
+  const handleUpload = async () => {
+    const pending = files.filter((f) => f.status === 'pending');
+    if (pending.length === 0) return;
+
+    setIsUploading(true);
+    const results = await Promise.all(pending.map((fs) => uploadSingleFile(fs)));
     setIsUploading(false);
-    if (allDone) {
+
+    const allDone = results.every(Boolean) && files.every((f) => f.status === 'done' || results[pending.indexOf(f)]);
+    if (files.filter((f) => f.status !== 'retrying').every((f) => f.status === 'done')) {
       onSuccess();
       handleClose();
     }
+    void allDone; // referenced to avoid lint warning
   };
 
   const handleClose = () => {
@@ -121,7 +169,8 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
     setFiles((prev) => prev.filter((f) => f.file !== file));
   };
 
-  const pendingCount = files.filter((f) => f.status === 'pending').length;
+  const pendingCount = files.filter((f) => f.status === 'pending' || f.status === 'error').length;
+  const retryingCount = files.filter((f) => f.status === 'retrying').length;
 
   return (
     <Dialog
@@ -207,6 +256,8 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
                     <CheckCircleOutlined sx={{ color: 'success.main', fontSize: 20 }} />
                   ) : fileState.status === 'error' ? (
                     <ErrorOutlined sx={{ color: 'error.main', fontSize: 20 }} />
+                  ) : fileState.status === 'retrying' ? (
+                    <HourglassTopOutlined sx={{ color: 'warning.main', fontSize: 20 }} />
                   ) : (
                     <InsertDriveFileOutlined sx={{ color: 'primary.main', fontSize: 20 }} />
                   )}
@@ -216,12 +267,19 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
                   secondary={
                     fileState.status === 'error'
                       ? fileState.error
+                      : fileState.status === 'retrying'
+                      ? `Backend starting up — retrying in ${fileState.retryIn ?? 0}s…`
                       : `${formatBytes(fileState.file.size)} · ${fileState.status}`
                   }
                   primaryTypographyProps={{ variant: 'body2', fontWeight: 500 }}
                   secondaryTypographyProps={{
                     variant: 'caption',
-                    color: fileState.status === 'error' ? 'error' : 'text.secondary',
+                    color:
+                      fileState.status === 'error'
+                        ? 'error'
+                        : fileState.status === 'retrying'
+                        ? 'warning.main'
+                        : 'text.secondary',
                   }}
                 />
                 {fileState.status === 'uploading' && (
@@ -231,6 +289,11 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
                       value={fileState.progress}
                       sx={{ borderRadius: 2 }}
                     />
+                  </Box>
+                )}
+                {fileState.status === 'retrying' && (
+                  <Box sx={{ width: 80, ml: 1 }}>
+                    <LinearProgress variant="indeterminate" color="warning" sx={{ borderRadius: 2 }} />
                   </Box>
                 )}
               </ListItem>
@@ -243,6 +306,11 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
             Some files failed to upload. Remove them or retry.
           </Alert>
         )}
+        {files.some((f) => f.status === 'retrying') && !files.some((f) => f.status === 'error') && (
+          <Alert severity="warning" sx={{ mt: 1, borderRadius: 2 }}>
+            Backend services are starting up. Files will be uploaded automatically once ready.
+          </Alert>
+        )}
       </DialogContent>
 
       <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
@@ -251,12 +319,14 @@ export function UploadDialog({ open, onClose, onSuccess }: UploadDialogProps) {
         </Button>
         <Button
           onClick={() => void handleUpload()}
-          disabled={pendingCount === 0 || isUploading}
+          disabled={(pendingCount === 0 && retryingCount === 0) || isUploading}
           variant="contained"
           startIcon={<CloudUploadOutlined />}
         >
           {isUploading
             ? 'Uploading…'
+            : retryingCount > 0 && pendingCount === 0
+            ? 'Waiting for backend…'
             : `Upload ${pendingCount > 0 ? `${pendingCount} file${pendingCount > 1 ? 's' : ''}` : ''}`}
         </Button>
       </DialogActions>

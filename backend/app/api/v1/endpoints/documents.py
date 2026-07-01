@@ -13,7 +13,7 @@ async def list_documents(page: int = 1, page_size: int = 20) -> dict:
 async def upload_document() -> dict:
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Document upload will be implemented in Phase 1 backend.",
+        detail="Document upload will be implemented in Phase 1 backend. ",
     )
 
 

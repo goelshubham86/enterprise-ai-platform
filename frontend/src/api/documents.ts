@@ -1,6 +1,7 @@
 import type { Document, DocumentUploadResponse, PaginatedResponse } from '@/types';
 import { apiClient } from './client';
 
+
 export const documentsApi = {
   list: async (page = 1, pageSize = 20): Promise<PaginatedResponse<Document>> => {
     const { data } = await apiClient.get<PaginatedResponse<Document>>('/documents', {

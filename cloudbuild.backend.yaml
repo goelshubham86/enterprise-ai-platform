@@ -97,7 +97,7 @@ steps:
       - --allow-unauthenticated
       - --memory=2Gi
       - --cpu=2
-      - --min-instances=1
+      - --min-instances=0
       - --max-instances=10
       # ── Runtime environment variables ─────────────────────────
       # GCP_PROJECT_ID, GCP_REGION, APP_ENV are always set from build context.
